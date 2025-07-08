@@ -1,0 +1,382 @@
+#include "CRSF.h"
+#include "CRSFHandset.h"
+#include "FIFO.h"
+
+#include <hal/uart_ll.h>
+#include <soc/soc.h>
+#include <soc/uart_reg.h>
+
+#if (GPIO_PIN_RCSIGNAL_RX_IN == 16) && (GPIO_PIN_RCSIGNAL_TX_OUT == 17)
+HardwareSerial CRSFHandset::Port(1);
+#else
+HardwareSerial CRSFHandset::Port(0);
+#endif
+
+static constexpr int HANDSET_TELEMETRY_FIFO_SIZE = 128; // this is the smallest telemetry FIFO size in EdgeTX with CRSF defined
+uint8_t CRSFHandset::modelId = 0; // Initialize the model ID as received from the handset to first model
+
+/// Out FIFO to buffer messages ///
+static constexpr auto CRSF_SERIAL_OUT_FIFO_SIZE = 256U;
+static FIFO<CRSF_SERIAL_OUT_FIFO_SIZE> SerialOutFIFO;
+
+/// EdgeTX mixer sync ///
+static const int32_t EdgeTXsyncPacketInterval = 200; // in ms
+static const int32_t EdgeTXsyncOffsetSafeMargin = 1000; // 100us
+
+/// UART Handling ///
+uint32_t CRSFHandset::UARTbaud = HANDSET_BAUD;
+
+void CRSFHandset::Begin()
+{
+    portDISABLE_INTERRUPTS();
+    #if not defined(GPIO_PIN_RCSIGNAL_RX_IN) || not defined(GPIO_PIN_RCSIGNAL_TX_OUT)
+        #error "GPIO_PIN_RCSIGNAL_RX_IN and GPIO_PIN_RCSIGNAL_TX_OUT must be defined for the RF module to be able to talk to the handset"
+    #endif
+    CRSFHandset::Port.begin(UARTbaud, SERIAL_8N1,
+                     GPIO_PIN_RCSIGNAL_RX_IN, GPIO_PIN_RCSIGNAL_TX_OUT,
+                     false, 0);
+    // Arduino defaults every ESP32 stream to a 1000ms timeout, need to explicitly override this
+    CRSFHandset::Port.setTimeout(0);
+    portENABLE_INTERRUPTS();
+    flush_port_input();
+	modelId = 0; // Start with modelID 0
+}
+
+void CRSFHandset::flush_port_input()
+{
+    // Make sure there is no garbage on the UART at the start
+    while (CRSFHandset::Port.available())
+    {
+        CRSFHandset::Port.read();
+    }
+}
+
+void CRSFHandset::makeLinkStatisticsPacket(uint8_t *buffer)
+{
+    constexpr uint8_t payloadLen = sizeof(crsfLinkStatistics_t);
+
+    buffer[0] = CRSF_ADDRESS_RADIO_TRANSMITTER;
+    buffer[1] = CRSF_FRAME_SIZE(payloadLen);
+    buffer[2] = CRSF_FRAMETYPE_LINK_STATISTICS;
+    memcpy(&buffer[3], (uint8_t *)&CRSF::LinkStatistics, payloadLen);
+    buffer[payloadLen + 3] = crsf_crc.calc(&buffer[2], payloadLen + 1);
+}
+
+/**
+ * Build a an extended type packet and queue it in the SerialOutFIFO
+ * This is just a regular packet with 2 extra bytes with the sub src and target
+ **/
+void CRSFHandset::packetQueueExtended(uint8_t type, void *data, uint8_t len)
+{
+    uint8_t buf[6] = {
+        (uint8_t)(len + 6),
+        CRSF_ADDRESS_RADIO_TRANSMITTER,
+        (uint8_t)(len + 4),
+        type,
+        CRSF_ADDRESS_RADIO_TRANSMITTER,
+        CRSF_ADDRESS_CRSF_TRANSMITTER
+    };
+
+    // CRC - Starts at type, ends before CRC
+    uint8_t crc = crsf_crc.calc(&buf[3], sizeof(buf)-3);
+    crc = crsf_crc.calc((byte *)data, len, crc);
+
+    SerialOutFIFO.lock();
+    if (SerialOutFIFO.ensure(buf[0] + 1))
+    {
+        SerialOutFIFO.pushBytes(buf, sizeof(buf));
+        SerialOutFIFO.pushBytes((byte *)data, len);
+        SerialOutFIFO.push(crc);
+    }
+    SerialOutFIFO.unlock();
+}
+
+void CRSFHandset::sendTelemetryToTX(uint8_t *data)
+{
+    if (controllerConnected)
+    {
+        uint8_t size = CRSF_FRAME_SIZE(data[CRSF_TELEMETRY_LENGTH_INDEX]);
+        if (size > CRSF_MAX_PACKET_LEN)
+        {
+            // Error - too much data, does not fit
+            return;
+        }
+
+        data[0] = CRSF_ADDRESS_RADIO_TRANSMITTER;
+        SerialOutFIFO.lock();
+        if (SerialOutFIFO.ensure(size + 1))
+        {
+            SerialOutFIFO.push(size); // length
+            SerialOutFIFO.pushBytes(data, size);
+        }
+        SerialOutFIFO.unlock();
+    }
+}
+
+void ICACHE_RAM_ATTR CRSFHandset::JustSentRFpacket()
+{
+    // read them in this order to prevent a potential race condition
+    uint32_t last = dataLastRecv;
+    uint32_t m = micros();
+    auto delta = (int32_t)(m - last);
+
+    if (delta >= (int32_t)RequestedRCpacketIntervalUS)
+    {
+        // missing/late packet, force resync
+        EdgeTXsyncOffset = -(delta % RequestedRCpacketIntervalUS) * 10;
+        EdgeTXsyncWindow = 0;
+        EdgeTXsyncLastSent -= EdgeTXsyncPacketInterval;
+    }
+    else
+    {
+        // The number of packets in the sync window is how many will fit in 20ms.
+        EdgeTXsyncWindow = std::min(EdgeTXsyncWindow + 1, (int32_t)EdgeTXsyncWindowSize);
+        EdgeTXsyncOffset = ((EdgeTXsyncOffset * (EdgeTXsyncWindow-1)) + delta * 10) / EdgeTXsyncWindow;
+    }
+}
+
+void CRSFHandset::sendSyncPacketToTX() // in values in us.
+{
+    uint32_t now = millis();
+    if (controllerConnected && (now - EdgeTXsyncLastSent) >= EdgeTXsyncPacketInterval)
+    {
+        int32_t packetRate = RequestedRCpacketIntervalUS * 10; //convert from us to right format
+        int32_t offset = EdgeTXsyncOffset - EdgeTXsyncOffsetSafeMargin; // offset so that opentx always has some headroom
+
+        struct etxSyncData {
+            uint8_t subType; // CRSF_HANDSET_SUBCMD_TIMING
+            uint32_t rate; // Big-Endian
+            uint32_t offset; // Big-Endian
+        } PACKED;
+
+        uint8_t buffer[sizeof(etxSyncData)];
+        auto * const sync = (struct etxSyncData * const)buffer;
+
+        sync->subType = CRSF_HANDSET_SUBCMD_TIMING;
+        sync->rate = htobe32(packetRate);
+        sync->offset = htobe32(offset);
+
+        packetQueueExtended(CRSF_FRAMETYPE_HANDSET, buffer, sizeof(buffer));
+
+        EdgeTXsyncLastSent = now;
+    }
+}
+
+void CRSFHandset::RcPacketToChannelsData() // data is packed as 11 bits per channel
+{
+    auto payload = (uint8_t const * const)&inBuffer.asRCPacket_t.channels;
+    constexpr unsigned srcBits = 11;
+    constexpr unsigned dstBits = 11;
+    constexpr unsigned inputChannelMask = (1 << srcBits) - 1;
+    constexpr unsigned precisionShift = dstBits - srcBits;
+
+    // code from BetaFlight rx/crsf.cpp / bitpacker_unpack
+    uint8_t bitsMerged = 0;
+    uint32_t readValue = 0;
+    unsigned readByteIndex = 0;
+    for (volatile uint16_t & n : ChannelData)
+    {
+        while (bitsMerged < srcBits)
+        {
+            uint8_t readByte = payload[readByteIndex++];
+            readValue |= ((uint32_t) readByte) << bitsMerged;
+            bitsMerged += 8;
+        }
+        //printf("rv=%x(%x) bm=%u\n", readValue, (readValue & inputChannelMask), bitsMerged);
+        n = (uint16_t)((readValue & inputChannelMask) << precisionShift);
+        readValue >>= srcBits;
+        bitsMerged -= srcBits;
+    }
+
+    // Call the registered RCdataCallback, if there is one, so it can modify the channel data if it needs to.
+    if (RCdataCallback) RCdataCallback();
+}
+
+bool CRSFHandset::processInternalCrsfPackage(uint8_t *package)
+{
+    const crsf_ext_header_t *header = (crsf_ext_header_t *)package;
+    const crsf_frame_type_e packetType = (crsf_frame_type_e)header->type;
+
+	/*
+    // Enter Binding Mode
+    if (packetType == CRSF_FRAMETYPE_COMMAND
+        && header->frame_size >= 6 // official CRSF is 7 bytes with two CRCs
+        && header->dest_addr == CRSF_ADDRESS_CRSF_TRANSMITTER
+        && header->orig_addr == CRSF_ADDRESS_RADIO_TRANSMITTER
+        && header->payload[0] == CRSF_COMMAND_SUBCMD_RX
+        && header->payload[1] == CRSF_COMMAND_SUBCMD_RX_BIND)
+    {
+        if (OnBindingCommand) OnBindingCommand();
+        return true;
+    }
+	*/
+
+    if (packetType >= CRSF_FRAMETYPE_DEVICE_PING &&
+        (header->dest_addr == CRSF_ADDRESS_CRSF_TRANSMITTER || header->dest_addr == CRSF_ADDRESS_BROADCAST) &&
+        (header->orig_addr == CRSF_ADDRESS_RADIO_TRANSMITTER))
+    {
+        if (packetType == CRSF_FRAMETYPE_COMMAND && header->payload[0] == CRSF_COMMAND_SUBCMD_RX && header->payload[1] == CRSF_COMMAND_MODEL_SELECT_ID)
+        {
+            modelId = header->payload[2];
+        }
+        return true;
+    }
+    return false;
+}
+
+bool CRSFHandset::ProcessPacket()
+{
+    bool packetReceived = false;
+
+    CRSFHandset::dataLastRecv = micros();
+
+    if (!controllerConnected)
+    {
+        // CRSF UART Connected
+        controllerConnected = true;
+        if (connected) connected();
+    }
+
+    const uint8_t packetType = inBuffer.asRCPacket_t.header.type;
+    uint8_t *SerialInBuffer = inBuffer.asUint8_t;
+
+    if (packetType == CRSF_FRAMETYPE_RC_CHANNELS_PACKED)
+    {
+        RCdataLastRecv = micros();
+        RcPacketToChannelsData();
+        packetReceived = true;
+    }
+    // check for all extended frames that are a broadcast or a message to the FC
+    else if (packetType >= CRSF_FRAMETYPE_DEVICE_PING &&
+            (SerialInBuffer[3] == CRSF_ADDRESS_FLIGHT_CONTROLLER || SerialInBuffer[3] == CRSF_ADDRESS_BROADCAST || SerialInBuffer[3] == CRSF_ADDRESS_CRSF_RECEIVER))
+    {
+		if (packetType == CRSF_FRAMETYPE_DEVICE_PING)
+		{
+			// Reply with device information
+			uint8_t deviceInformation[DEVICE_INFORMATION_LENGTH];
+			CRSF::GetDeviceInformation(deviceInformation, 0);
+			// does append header + crc again so subtract size from length
+			CRSFHandset::packetQueueExtended(CRSF_FRAMETYPE_DEVICE_INFO, deviceInformation + sizeof(crsf_ext_header_t), DEVICE_INFORMATION_PAYLOAD_LENGTH);
+		}
+        packetReceived = true;
+    }
+
+	packetReceived |= processInternalCrsfPackage(SerialInBuffer);
+    
+	return packetReceived;
+}
+
+void CRSFHandset::alignBufferToSync(uint8_t startIdx)
+{
+    uint8_t *SerialInBuffer = inBuffer.asUint8_t;
+
+    for (unsigned int i=startIdx ; i<SerialInPacketPtr ; i++)
+    {
+        // If we find a header byte then move that and trailing bytes to the head of the buffer and let's go!
+        if (SerialInBuffer[i] == CRSF_ADDRESS_CRSF_TRANSMITTER || SerialInBuffer[i] == CRSF_SYNC_BYTE)
+        {
+            SerialInPacketPtr -= i;
+            memmove(SerialInBuffer, &SerialInBuffer[i], SerialInPacketPtr);
+            return;
+        }
+    }
+
+    // If no header found then discard this entire buffer
+    SerialInPacketPtr = 0;
+}
+
+void CRSFHandset::handleInput()
+{
+    uint8_t *SerialInBuffer = inBuffer.asUint8_t;
+
+    // Add new data, and then discard bytes until we start with header byte
+    auto toRead = std::min(CRSFHandset::Port.available(), CRSF_MAX_PACKET_LEN - SerialInPacketPtr);
+    SerialInPacketPtr += CRSFHandset::Port.readBytes(&SerialInBuffer[SerialInPacketPtr], toRead);
+    alignBufferToSync(0);
+
+    // Make sure we have at least a packet header and a length byte
+    if (SerialInPacketPtr < 3)
+        return;
+
+    // Sanity check: A total packet must be at least [sync][len][type][crc] (if no payload) and at most CRSF_MAX_PACKET_LEN
+    const uint32_t totalLen = SerialInBuffer[1] + 2;
+    if (totalLen < 4 || totalLen > CRSF_MAX_PACKET_LEN)
+    {
+        // Start looking for another packet after this start byte
+        alignBufferToSync(1);
+        return;
+    }
+
+    // Only proceed one there are enough bytes in the buffer for the entire packet
+    if (SerialInPacketPtr < totalLen)
+        return;
+
+    uint8_t CalculatedCRC = crsf_crc.calc(&SerialInBuffer[2], totalLen - 3);
+    if (CalculatedCRC == SerialInBuffer[totalLen - 1])
+    {
+        GoodPktsCount++;
+        if (ProcessPacket())
+        {
+            handleOutput(totalLen);
+            if (RCdataCallback)
+            {
+                RCdataCallback();
+            }
+        }
+    }
+    else
+    {
+        // UART CRC failure
+        BadPktsCount++;
+    }
+
+    SerialInPacketPtr -= totalLen;
+    memmove(SerialInBuffer, &SerialInBuffer[totalLen], SerialInPacketPtr);
+}
+
+void CRSFHandset::handleOutput(int receivedBytes)
+{
+    static uint8_t CRSFoutBuffer[CRSF_MAX_PACKET_LEN] = {0};
+    // both static to split up larger packages
+    static uint8_t packageLengthRemaining = 0;
+    static uint8_t sendingOffset = 0;
+
+    if (!controllerConnected)
+    {
+        SerialOutFIFO.lock();
+        SerialOutFIFO.flush();
+        SerialOutFIFO.unlock();
+        return;
+    }
+
+    if (packageLengthRemaining == 0 && SerialOutFIFO.size() == 0)
+    {
+        sendSyncPacketToTX(); // calculate mixer sync packet if needed
+    }
+
+    // if partial package remaining, or data in the output FIFO that needs to be written
+    if (packageLengthRemaining > 0 || SerialOutFIFO.size() > 0) {
+        uint8_t periodBytesRemaining = HANDSET_TELEMETRY_FIFO_SIZE;
+        do
+        {
+            SerialOutFIFO.lock();
+            // no package is in transit so get new data from the fifo
+            if (packageLengthRemaining == 0)
+            {
+                packageLengthRemaining = SerialOutFIFO.pop();
+                SerialOutFIFO.popBytes(CRSFoutBuffer, packageLengthRemaining);
+                sendingOffset = 0;
+            }
+            SerialOutFIFO.unlock();
+
+            // if the package is long we need to split it, so it fits in the sending interval
+            uint8_t writeLength = std::min(packageLengthRemaining, periodBytesRemaining);
+
+            // write the packet out, if it's a large package the offset holds the starting position
+            CRSFHandset::Port.write(CRSFoutBuffer + sendingOffset, writeLength);
+            sendingOffset += writeLength;
+            packageLengthRemaining -= writeLength;
+            periodBytesRemaining -= writeLength;
+        } while(periodBytesRemaining != 0 && SerialOutFIFO.size() != 0);
+    }
+}
