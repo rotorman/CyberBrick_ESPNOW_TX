@@ -3,7 +3,7 @@
 
 Here you can find a custom open-source firmware development for the [internal ExpressLRS](https://github.com/ExpressLRS/ExpressLRS/) RF module(s) to communicate with [Bambu Lab's/MakerWorld's CyberBrick Core](https://eu.store.bambulab.com/de/products/multi-function-controller-core-1pcs) receiver modules, flashed with [custom MicroPython ESP-NOW protocol](https://github.com/CyberBrick-Official/CyberBrick_Controller_Core/pull/4) (code at: [https://github.com/rotorman/CyberBrick_Controller_Core/tree/espnowdemo/src/community/app_espnow](https://github.com/rotorman/CyberBrick_Controller_Core/tree/espnowdemo/src/community/app_espnow)).
 
-To be built with [Visual Studio Code](https://code.visualstudio.com/) and [PlatformIO](https://platformio.org/) extension using [Arduino framework](https://docs.platformio.org/en/latest/frameworks/arduino.html) for [Espressif ESP32](https://docs.platformio.org/en/latest/platforms/espressif32.html#platform-espressif32) platform, similar to the [ExpressLRS firmware](https://www.expresslrs.org/software/toolchain-install/).
+The firmware can be built and flashed into the hardware using [Visual Studio Code](https://code.visualstudio.com/) and [PlatformIO](https://platformio.org/) extension paired with an [Arduino framework](https://docs.platformio.org/en/latest/frameworks/arduino.html) for [Espressif ESP32](https://docs.platformio.org/en/latest/platforms/espressif32.html#platform-espressif32) platform, similar to the development of the [ExpressLRS firmware](https://www.expresslrs.org/software/toolchain-install/).
 
 The code supports following handsets running [EdgeTX](https://edgetx.org/) open-source firmware (supported radios listed alphabetically):
 
