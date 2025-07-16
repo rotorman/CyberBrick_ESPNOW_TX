@@ -114,8 +114,59 @@ void initUnusedDevices(void)
     digitalWrite(GPIO_PIN_MISC_FAN_PWM_OUT, LOW);
 #endif
 
+#if defined(GPIO_PIN_FAN_EN_OUT)
+    pinMode(GPIO_PIN_FAN_EN_OUT, OUTPUT);
+    digitalWrite(GPIO_PIN_FAN_EN_OUT, LOW);
+#endif
+
+#if defined(GPIO_PIN_FAN_TACHO_IN)
+    pinMode(GPIO_PIN_FAN_TACHO_IN, INPUT);
+#endif
+
 #if defined(GPIO_PIN_LED_RGB_OUT)
     pinMode(GPIO_PIN_LED_RGB_OUT, OUTPUT);
     digitalWrite(GPIO_PIN_LED_RGB_OUT, LOW);
+#endif
+
+#if defined(GPIO_PIN_SCL_OUT)
+    pinMode(GPIO_PIN_SCL_OUT, OUTPUT_OPEN_DRAIN | PULLUP);
+    digitalWrite(GPIO_PIN_SCL_OUT, HIGH);
+#endif
+
+#if defined(GPIO_PIN_SDA_INOUT)
+    pinMode(GPIO_PIN_SDA_INOUT, OUTPUT_OPEN_DRAIN | PULLUP);
+    digitalWrite(GPIO_PIN_SDA_INOUT, HIGH);
+#endif
+
+#if defined(GPIO_PIN_SCREEN_SCK_OUT)
+    pinMode(GPIO_PIN_SCREEN_SCK_OUT, OUTPUT_OPEN_DRAIN | PULLUP);
+    digitalWrite(GPIO_PIN_SCREEN_SCK_OUT, HIGH);
+#endif
+
+#if defined(GPIO_PIN_SCREEN_SDA_INOUT)
+    pinMode(GPIO_PIN_SCREEN_SDA_INOUT, OUTPUT_OPEN_DRAIN | PULLUP);
+    digitalWrite(GPIO_PIN_SCREEN_SDA_INOUT, HIGH);
+#endif
+
+#if defined(GPIO_PIN_JOYSTICK_AIN)
+    analogRead(GPIO_PIN_JOYSTICK_AIN);
+#endif
+
+#if defined(GPIO_PIN_BUTTON_IN)
+    pinMode(GPIO_PIN_BUTTON_IN, INPUT);
+#endif
+
+#if defined(GPIO_PIN_USER_BUTTON_LED_OUT)
+    pinMode(GPIO_PIN_USER_BUTTON_LED_OUT, OUTPUT);
+    digitalWrite(GPIO_PIN_USER_BUTTON_LED_OUT, LOW);
+#endif
+
+#if defined(GPIO_PIN_BUTTON2_IN)
+    pinMode(GPIO_PIN_BUTTON2_IN, INPUT);
+#endif
+
+#if defined(GPIO_PIN_USER_BUTTON2_LED_OUT)
+    pinMode(GPIO_PIN_USER_BUTTON2_LED_OUT, OUTPUT);
+    digitalWrite(GPIO_PIN_USER_BUTTON2_LED_OUT, LOW);
 #endif
 }
