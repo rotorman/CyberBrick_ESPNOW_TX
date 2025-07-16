@@ -8,7 +8,7 @@ The examples in this branch currently include code for [truck](https://makerworl
 
 What are the benefits of the code in this branch in comparison to the original CyberBrick MicroPython stack:
 - Fully open-source with no hidden/frozen MicroPython modules used.
-- Smoother control - full 12-bits are used to control the servos and also the motors, instead of only ca. 41 steps for motor and 102 steps for servo angle in original control. Also, the motor control PWM frequency is increased from 50 Hz to 100 Hz.
+- Smoother control - full 12-bits are used to control the servos and also the motors, instead of only ca. 41 steps for motor and 102 steps for servo angle in original control. Also, the motor control PWM frequency is increased from 50 Hz to 500 Hz.
 - Fully customizable NeoPixel LED driver. Actuate the various LED pixels from remote or from some logic combination of other channel states.
 
 Downsides:
