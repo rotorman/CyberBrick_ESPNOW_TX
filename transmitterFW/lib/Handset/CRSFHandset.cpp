@@ -5,6 +5,7 @@
 #include <hal/uart_ll.h>
 #include <soc/soc.h>
 #include <soc/uart_reg.h>
+#include <esp32/rom/gpio.h>
 
 #if (GPIO_PIN_RCSIGNAL_RX_IN == 16) && (GPIO_PIN_RCSIGNAL_TX_OUT == 17)
 HardwareSerial CRSFHandset::Port(1);
@@ -13,11 +14,13 @@ HardwareSerial CRSFHandset::Port(0);
 #endif
 
 static constexpr int HANDSET_TELEMETRY_FIFO_SIZE = 128; // this is the smallest telemetry FIFO size in EdgeTX with CRSF defined
-uint8_t CRSFHandset::modelId = 0; // Initialize the model ID as received from the handset to first model
 
 /// Out FIFO to buffer messages ///
 static constexpr auto CRSF_SERIAL_OUT_FIFO_SIZE = 256U;
 static FIFO<CRSF_SERIAL_OUT_FIFO_SIZE> SerialOutFIFO;
+
+uint8_t CRSFHandset::modelId = 0; // Initialize the model ID as received from the handset to first model
+bool CRSFHandset::halfDuplex = false;
 
 /// EdgeTX mixer sync ///
 static const int32_t EdgeTXsyncPacketInterval = 200; // in ms
@@ -28,15 +31,22 @@ uint32_t CRSFHandset::UARTbaud = HANDSET_BAUD;
 
 void CRSFHandset::Begin()
 {
-    portDISABLE_INTERRUPTS();
     #if not defined(GPIO_PIN_RCSIGNAL_RX_IN) || not defined(GPIO_PIN_RCSIGNAL_TX_OUT)
         #error "GPIO_PIN_RCSIGNAL_RX_IN and GPIO_PIN_RCSIGNAL_TX_OUT must be defined for the RF module to be able to talk to the handset"
     #endif
+    halfDuplex = (GPIO_PIN_RCSIGNAL_TX_OUT == GPIO_PIN_RCSIGNAL_RX_IN);
+
+    portDISABLE_INTERRUPTS();
+    UARTinverted = halfDuplex; // on a half duplex UART, go with inverted
     CRSFHandset::Port.begin(UARTbaud, SERIAL_8N1,
                      GPIO_PIN_RCSIGNAL_RX_IN, GPIO_PIN_RCSIGNAL_TX_OUT,
                      false, 0);
     // Arduino defaults every ESP32 stream to a 1000ms timeout, need to explicitly override this
     CRSFHandset::Port.setTimeout(0);
+    if (halfDuplex)
+    {
+        duplex_set_RX();
+    }
     portENABLE_INTERRUPTS();
     flush_port_input();
 	modelId = 0; // Start with modelID 0
@@ -288,6 +298,20 @@ void CRSFHandset::alignBufferToSync(uint8_t startIdx)
 void CRSFHandset::handleInput()
 {
     uint8_t *SerialInBuffer = inBuffer.asUint8_t;
+	
+    if (transmitting)
+    {
+        // if currently transmitting in half-duplex mode then check if the TX buffers are empty.
+        // If there is still data in the transmit buffers then exit, and we'll check next go round.
+        if (!uart_ll_is_tx_idle(UART_LL_GET_HW(0)))
+        {
+            return;
+        }
+        // All done transmitting; go back to receive mode
+        transmitting = false;
+        duplex_set_RX();
+        flush_port_input();
+    }
 
     // Add new data, and then discard bytes until we start with header byte
     auto toRead = std::min(CRSFHandset::Port.available(), CRSF_MAX_PACKET_LEN - SerialInPacketPtr);
@@ -357,6 +381,17 @@ void CRSFHandset::handleOutput(int receivedBytes)
     // if partial package remaining, or data in the output FIFO that needs to be written
     if (packageLengthRemaining > 0 || SerialOutFIFO.size() > 0) {
         uint8_t periodBytesRemaining = HANDSET_TELEMETRY_FIFO_SIZE;
+        if (halfDuplex)
+        {
+            periodBytesRemaining = std::min((maxPeriodBytes - receivedBytes % maxPeriodBytes), (int)maxPacketBytes);
+            periodBytesRemaining = std::max(periodBytesRemaining, (uint8_t)10);
+            if (!transmitting)
+            {
+                transmitting = true;
+                duplex_set_TX();
+            }
+        }
+
         do
         {
             SerialOutFIFO.lock();
@@ -378,5 +413,44 @@ void CRSFHandset::handleOutput(int receivedBytes)
             packageLengthRemaining -= writeLength;
             periodBytesRemaining -= writeLength;
         } while(periodBytesRemaining != 0 && SerialOutFIFO.size() != 0);
+    }
+}
+
+void CRSFHandset::duplex_set_RX() const
+{
+    ESP_ERROR_CHECK(gpio_set_direction((gpio_num_t)GPIO_PIN_RCSIGNAL_RX_IN, GPIO_MODE_INPUT));
+    if (UARTinverted)
+    {
+        gpio_matrix_in((gpio_num_t)GPIO_PIN_RCSIGNAL_RX_IN, U0RXD_IN_IDX, true);
+        gpio_pulldown_en((gpio_num_t)GPIO_PIN_RCSIGNAL_RX_IN);
+        gpio_pullup_dis((gpio_num_t)GPIO_PIN_RCSIGNAL_RX_IN);
+    }
+    else
+    {
+        gpio_matrix_in((gpio_num_t)GPIO_PIN_RCSIGNAL_RX_IN, U0RXD_IN_IDX, false);
+        gpio_pullup_en((gpio_num_t)GPIO_PIN_RCSIGNAL_RX_IN);
+        gpio_pulldown_dis((gpio_num_t)GPIO_PIN_RCSIGNAL_RX_IN);
+    }
+}
+
+void CRSFHandset::duplex_set_TX() const
+{
+    ESP_ERROR_CHECK(gpio_set_pull_mode((gpio_num_t)GPIO_PIN_RCSIGNAL_TX_OUT, GPIO_FLOATING));
+    ESP_ERROR_CHECK(gpio_set_pull_mode((gpio_num_t)GPIO_PIN_RCSIGNAL_RX_IN, GPIO_FLOATING));
+    if (UARTinverted)
+    {
+        ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)GPIO_PIN_RCSIGNAL_TX_OUT, 0));
+        ESP_ERROR_CHECK(gpio_set_direction((gpio_num_t)GPIO_PIN_RCSIGNAL_TX_OUT, GPIO_MODE_OUTPUT));
+        constexpr uint8_t MATRIX_DETACH_IN_LOW = 0x30; // routes 0 to matrix slot
+        gpio_matrix_in(MATRIX_DETACH_IN_LOW, U0RXD_IN_IDX, false); // Disconnect RX from all pads
+        gpio_matrix_out((gpio_num_t)GPIO_PIN_RCSIGNAL_TX_OUT, U0TXD_OUT_IDX, true, false);
+    }
+    else
+    {
+        ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)GPIO_PIN_RCSIGNAL_TX_OUT, 1));
+        ESP_ERROR_CHECK(gpio_set_direction((gpio_num_t)GPIO_PIN_RCSIGNAL_TX_OUT, GPIO_MODE_OUTPUT));
+        constexpr uint8_t MATRIX_DETACH_IN_HIGH = 0x38; // routes 1 to matrix slot
+        gpio_matrix_in(MATRIX_DETACH_IN_HIGH, U0RXD_IN_IDX, false); // Disconnect RX from all pads
+        gpio_matrix_out((gpio_num_t)GPIO_PIN_RCSIGNAL_TX_OUT, U0TXD_OUT_IDX, false, false);
     }
 }

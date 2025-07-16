@@ -2,7 +2,7 @@
 
 <img width="898" height="470" alt="EdgeTX radios control CyberBrick models" src="https://github.com/user-attachments/assets/a372add2-57e0-49bd-9552-04f00adca2f2" />
 
-This repository contains a custom open-source firmware development for the [internal ExpressLRS](https://github.com/ExpressLRS/ExpressLRS/) RF module(s) and custom MicroPython scripts for the [Bambu Lab's/MakerWorld's CyberBrick Core](https://eu.store.bambulab.com/de/products/multi-function-controller-core-1pcs) receiver modules in order to talk to each other w/o any hardware modifications needed. With the custom firmare from this project flashed, a radio transmitter, running open-source [EdgeTX](https://edgetx.org/) firmware, and equipped with an internal ExpressLRS RF module, talks via [ESP-NOW](https://www.espressif.com/en/solutions/low-power-solutions/esp-now) wireless protocol with the [CyberBrick Core](https://eu.store.bambulab.com/de/products/multi-function-controller-core-1pcs) in the [3D printed models](https://makerworld.com/de/search/models?keyword=cyberbrick).
+This repository contains a custom open-source firmware development for a large number of [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS/) RF module(s) and custom MicroPython scripts for the [Bambu Lab's/MakerWorld's CyberBrick Core](https://eu.store.bambulab.com/de/products/multi-function-controller-core-1pcs) receiver modules in order to talk to each other w/o any hardware modifications needed. With the custom firmare from this project flashed, a radio transmitter, running open-source [EdgeTX](https://edgetx.org/) firmware, and equipped with an ExpressLRS RF module, talks via [ESP-NOW](https://www.espressif.com/en/solutions/low-power-solutions/esp-now) wireless protocol with the [CyberBrick Core](https://eu.store.bambulab.com/de/products/multi-function-controller-core-1pcs) in the [3D printed models](https://makerworld.com/de/search/models?keyword=cyberbrick).
 
 <img alt="EdgeTXplusCyberBrickAreGreatFun" src="https://github.com/user-attachments/assets/dae157e8-c7b3-4e4b-a221-7fbd8e9f20e9" width="800px" />
 
@@ -10,7 +10,7 @@ A brief video showing the code in action:
 
 [![Video showing EdgeTX radio controlling CyberBrick model](https://github.com/user-attachments/assets/e9a77cc4-9c01-408b-a0df-a8bd3900f830)](https://www.youtube.com/watch?v=XFTqVabXlMM)
 
-You can find the C++ source code to flash the internal ExpressLRS modules under [transmitterFW](https://github.com/rotorman/CyberBrick_ESPNOW/tree/main/transmitterFW) subfolder and the MicroPython scripts for the CyberBrick Core modules under the [receiverPY](https://github.com/rotorman/CyberBrick_ESPNOW/tree/main/receiverPY) subfolder.
+You can find the C++ source code to flash numerous internal and external ExpressLRS modules under [transmitterFW](https://github.com/rotorman/CyberBrick_ESPNOW/tree/main/transmitterFW) subfolder and the MicroPython scripts for the CyberBrick Core modules under the [receiverPY](https://github.com/rotorman/CyberBrick_ESPNOW/tree/main/receiverPY) subfolder.
 
 The firmware can be built and flashed into the hardware using [Visual Studio Code](https://code.visualstudio.com/) and [PlatformIO](https://platformio.org/) extension paired with an [Arduino framework](https://docs.platformio.org/en/latest/frameworks/arduino.html) for [Espressif ESP32](https://docs.platformio.org/en/latest/platforms/espressif32.html#platform-espressif32) platform, similar to the development of the [ExpressLRS firmware](https://www.expresslrs.org/software/toolchain-install/).
 
@@ -34,12 +34,21 @@ The code should work with the following handsets running [EdgeTX](https://edgetx
 * [RadioMaster TX16s mkII with internal ELRS module](https://radiomasterrc.com/products/tx16s-mark-ii-radio-controller)
 * [RadioMaster Zorro with internal ELRS module](https://radiomasterrc.com/products/zorro-radio-controller?variant=46486367371456)
 
-Do note, that I at present time, I have tested the code only with RadioMaster TX16s mkII with internal ExpressLRS module, RadioMaster MT12 with internal 2.4 GHz ExpressLRS module, with Jumper T15 with internal 2.4 GHz ExpressLRS module and ESP32 development kit (ESP32DevKitCv4).
+The code supports following external RF modules (modules listed alphabetically):
+
+* [HappyModel ES24TX](https://www.happymodel.cn/index.php/2021/04/12/happymodel-2-4g-expresslrs-elrs-micro-tx-module-es24tx/)
+* [HappyModel ES24TX Pro](https://www.happymodel.cn/index.php/2021/11/11/happymodel-es24tx-pro-micro-expresslrs-elrs-tx-module/)
+* [Jumper AION Nano](https://www.jumper-rc.com/modules/jumper-2-4g-elrs-tx-module/)
+* [RadioMaster Ranger](https://radiomasterrc.com/products/ranger-2-4ghz-elrs-module)
+* [RadioMaster Ranger Micro](https://radiomasterrc.com/products/ranger-micro-2-4ghz-elrs-module)
+* [RadioMaster Ranger Nano](https://radiomasterrc.com/products/ranger-nano-2-4ghz-elrs-module)
+
+Do note, that I at present time, I have tested the code only with RadioMaster TX16s mkII with internal ExpressLRS module, RadioMaster MT12 with internal 2.4 GHz ExpressLRS module, with Jumper T15 with internal 2.4 GHz ExpressLRS module, HappyModel ES24TX Pro, RadioMaster Ranger and ESP32 development kit (ESP32DevKitCv4).
 
 ## Flashing
-Flashing the internal ExpressLRS module(s) is possible via EdgeTX passthrough (triggered in the background while uploading firmware from VSCode and PlatformIO by [Python script](https://github.com/rotorman/CyberBrick_ESPNOW/transmitterFW/python/EdgeTXpassthrough.py)).
+Flashing the internal ExpressLRS module(s) is possible via EdgeTX passthrough (triggered in the background while uploading firmware from VSCode and PlatformIO by [Python script](https://github.com/rotorman/CyberBrick_ESPNOW/transmitterFW/python/EdgeTXpassthrough.py)). External modules can be flashed via UART (via USB-to-serial adapter).
 
-The development and testing was carried out using an [ESP32DevKitCv4](https://www.az-delivery.de/en/products/esp-32-dev-kit-c-v4), paired with radio running [EdgeTX](https://edgetx.org/) firmware. The code is setup for in-circuit-debugging with [ESP-Prog](https://docs.espressif.com/projects/esp-iot-solution/en/latest/hw-reference/ESP-Prog_guide.html) on ESP32DevKitCv4 target. You can find more info about this in the [Wiki section](https://github.com/rotorman/CyberBrick_ESPNOW/wiki/In%E2%80%90Circuit%E2%80%90Debugging), incl. a detailed hookup scheme.
+The original development was carried out using an [ESP32DevKitCv4](https://www.az-delivery.de/en/products/esp-32-dev-kit-c-v4), paired with a radio running [EdgeTX](https://edgetx.org/) firmware. The code is setup for in-circuit-debugging with [ESP-Prog](https://docs.espressif.com/projects/esp-iot-solution/en/latest/hw-reference/ESP-Prog_guide.html) on ESP32DevKitCv4 target. You can find more info about this in the [Wiki section](https://github.com/rotorman/CyberBrick_ESPNOW/wiki/In%E2%80%90Circuit%E2%80%90Debugging), incl. a detailed hookup scheme.
 
 ## Credits
 Numerous parts of the code used in this repository stem from the wonderful [ExpressLRS project](https://github.com/ExpressLRS/ExpressLRS/).

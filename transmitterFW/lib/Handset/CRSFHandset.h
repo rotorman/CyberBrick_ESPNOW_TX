@@ -61,11 +61,13 @@ public:
      * @return the time in microseconds when the last RC packet was received from the handset
      */
     uint32_t GetRCdataLastRecv() const { return RCdataLastRecv; }
-	
+
 	/**
      * @return the maximum number of bytes that the protocol can send to the handset in a single message
      */
     uint8_t GetMaxPacketBytes() const { return maxPacketBytes; }
+
+    static bool isHalfDuplex() { return halfDuplex; }
 
 protected:
     bool controllerConnected = false;
@@ -88,12 +90,18 @@ private:
 
     /// UART Handling ///
     uint8_t SerialInPacketPtr = 0; // index where we are reading/writing
+    static bool halfDuplex;
+    bool transmitting = false;
     uint32_t GoodPktsCount = 0;
     uint32_t BadPktsCount = 0;
     uint8_t maxPacketBytes = CRSF_MAX_PACKET_LEN;
     uint8_t maxPeriodBytes = CRSF_MAX_PACKET_LEN;
     static uint32_t UARTbaud;
+
+    bool UARTinverted = false;
     void sendSyncPacketToTX();
+    void duplex_set_RX() const;
+    void duplex_set_TX() const;
     void RcPacketToChannelsData();
     bool processInternalCrsfPackage(uint8_t *package);
     void alignBufferToSync(uint8_t startIdx);
