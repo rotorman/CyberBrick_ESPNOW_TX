@@ -27,10 +27,16 @@ static const int32_t EdgeTXsyncPacketInterval = 200; // in ms
 static const int32_t EdgeTXsyncOffsetSafeMargin = 1000; // 100us
 
 /// UART Handling ///
-uint32_t CRSFHandset::UARTbaud = HANDSET_BAUD;
+static const int32_t TxToHandsetBauds[] = {400000, 115200, 5250000, 3750000, 1870000, 921600, 2250000};
+uint32_t CRSFHandset::UARTrequestedBaud = 5250000;
+
+// for the UART wdt, every 1000ms we change bauds when connect is lost
+static const int UARTwdtInterval = 1000;
 
 void CRSFHandset::Begin()
 {
+    UARTwdtLastChecked = millis() + UARTwdtInterval; // allows a delay before the first time the UARTwdt() function is called
+	
     #if not defined(GPIO_PIN_RCSIGNAL_RX_IN) || not defined(GPIO_PIN_RCSIGNAL_TX_OUT)
         #error "GPIO_PIN_RCSIGNAL_RX_IN and GPIO_PIN_RCSIGNAL_TX_OUT must be defined for the RF module to be able to talk to the handset"
     #endif
@@ -38,7 +44,7 @@ void CRSFHandset::Begin()
 
     portDISABLE_INTERRUPTS();
     UARTinverted = halfDuplex; // on a half duplex UART, go with inverted
-    CRSFHandset::Port.begin(UARTbaud, SERIAL_8N1,
+    CRSFHandset::Port.begin(UARTrequestedBaud, SERIAL_8N1,
                      GPIO_PIN_RCSIGNAL_RX_IN, GPIO_PIN_RCSIGNAL_TX_OUT,
                      false, 0);
     // Arduino defaults every ESP32 stream to a 1000ms timeout, need to explicitly override this
@@ -299,6 +305,11 @@ void CRSFHandset::handleInput()
 {
     uint8_t *SerialInBuffer = inBuffer.asUint8_t;
 	
+	if (UARTwdt())
+    {
+        return;
+    }
+	
     if (transmitting)
     {
         // if currently transmitting in half-duplex mode then check if the TX buffers are empty.
@@ -453,4 +464,127 @@ void CRSFHandset::duplex_set_TX() const
         gpio_matrix_in(MATRIX_DETACH_IN_HIGH, U0RXD_IN_IDX, false); // Disconnect RX from all pads
         gpio_matrix_out((gpio_num_t)GPIO_PIN_RCSIGNAL_TX_OUT, U0TXD_OUT_IDX, false, false);
     }
+}
+
+int CRSFHandset::getMinPacketInterval() const
+{
+    if (CRSFHandset::isHalfDuplex() && CRSFHandset::GetCurrentBaudRate() == 115200) // Packet rate limited to 200Hz if we are on 115k baud on half-duplex module
+    {
+        return 5000;
+    }
+    else if (CRSFHandset::GetCurrentBaudRate() == 115200) // Packet rate limited to 250Hz if we are on 115k baud
+    {
+        return 4000;
+    }
+    else if (CRSFHandset::GetCurrentBaudRate() == 400000) // Packet rate limited to 500Hz if we are on 400k baud
+    {
+        return 2000;
+    }
+    return 1;   // 1-million Hz!
+}
+
+void ICACHE_RAM_ATTR CRSFHandset::adjustMaxPacketSize()
+{
+    const int LUA_CHUNK_QUERY_SIZE = 26;
+    // The number of bytes that fit into a CRSF window : baud / 10bits-per-byte / rate(Hz) * 87% (for some leeway)
+    // 87% was arrived at by measuring the time taken for a chunk query packet and the processing times and switching times
+    // involved from RX -> TX and vice-versa. The maxPacketBytes is used as the Lua chunk size so each chunk can be returned
+    // to the handset and not be broken across time-slots as there can be issues with spurious glitches on the s.port pin
+    // which switching direction. It also appears that the absolute minimum packet size should be 15 bytes as this will fit
+    // the LinkStatistics and OpenTX sync packets.
+    maxPeriodBytes = std::min((int)(UARTrequestedBaud / 10 / (1000000/RequestedRCpacketIntervalUS) * 87 / 100), HANDSET_TELEMETRY_FIFO_SIZE);
+    // Maximum number of bytes we can send in a single window, half the period bytes, upto one full CRSF packet.
+    maxPacketBytes = std::min(maxPeriodBytes - max(maxPeriodBytes / 2, LUA_CHUNK_QUERY_SIZE), CRSF_MAX_PACKET_LEN);
+}
+
+uint32_t CRSFHandset::autobaud()
+{
+    static enum { INIT, MEASURED, INVERTED } state;
+
+    if (state == MEASURED) {
+        UARTinverted = !UARTinverted;
+        state = INVERTED;
+        return UARTrequestedBaud;
+    }
+    if (state == INVERTED) {
+        UARTinverted = !UARTinverted;
+        state = INIT;
+    }
+
+    if (REG_GET_BIT(UART_AUTOBAUD_REG(0), UART_AUTOBAUD_EN) == 0) {
+        REG_WRITE(UART_AUTOBAUD_REG(0), 4 << UART_GLITCH_FILT_S | UART_AUTOBAUD_EN);    // enable, glitch filter 4
+        return 400000;
+    }
+    if (REG_GET_BIT(UART_AUTOBAUD_REG(0), UART_AUTOBAUD_EN) && REG_READ(UART_RXD_CNT_REG(0)) < 300)
+    {
+        return 400000;
+    }
+
+    state = MEASURED;
+
+    auto low_period  = (int32_t)REG_READ(UART_LOWPULSE_REG(0));
+    auto high_period = (int32_t)REG_READ(UART_HIGHPULSE_REG(0));
+    REG_CLR_BIT(UART_AUTOBAUD_REG(0), UART_AUTOBAUD_EN);   // disable autobaud
+
+    // sample code at https://github.com/espressif/esp-idf/issues/3336
+    // says baud rate = 80000000/min(UART_LOWPULSE_REG, UART_HIGHPULSE_REG);
+    // Based on testing use max and add 2 for lowest deviation
+    int32_t calculatedBaud = 80000000 / (max(low_period, high_period) + 3);
+    auto bestBaud = TxToHandsetBauds[0];
+    for(int TxToHandsetBaud : TxToHandsetBauds)
+    {
+        if (abs(calculatedBaud - bestBaud) > abs(calculatedBaud - (int32_t)TxToHandsetBaud))
+        {
+            bestBaud = (int32_t)TxToHandsetBaud;
+        }
+    }
+    return bestBaud;
+}
+
+bool CRSFHandset::UARTwdt()
+{
+    bool retval = false;
+    uint32_t now = millis();
+    if (now - UARTwdtLastChecked > UARTwdtInterval)
+    {
+        // If no packets or more bad than good packets, rate cycle/autobaud the UART but
+        // do not adjust the parameters while in wifi mode. If a firmware is being
+        // uploaded, it will cause tons of serial errors during the flash writes
+        if (BadPktsCount >= GoodPktsCount || !controllerConnected)
+        {
+            if (controllerConnected)
+            {
+                if (disconnected) disconnected();
+                controllerConnected = false;
+            }
+
+            UARTrequestedBaud = autobaud();
+            if (UARTrequestedBaud != 0)
+            {
+                adjustMaxPacketSize();
+
+                SerialOutFIFO.flush();
+                CRSFHandset::Port.flush();
+                CRSFHandset::Port.updateBaudRate(UARTrequestedBaud);
+                if (halfDuplex)
+                {
+                    duplex_set_RX();
+                }
+                // cleanup input buffer
+                flush_port_input();
+            }
+            retval = true;
+        }
+
+        UARTwdtLastChecked = now;
+        if (retval)
+        {
+            // Speed up the cycling
+            UARTwdtLastChecked -= 3 * (UARTwdtInterval >> 2);
+        }
+
+        BadPktsCount = 0;
+        GoodPktsCount = 0;
+    }
+    return retval;
 }
