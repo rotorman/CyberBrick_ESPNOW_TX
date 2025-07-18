@@ -3,6 +3,7 @@
 #include "common.h"
 #include "CRSFHandset.h"
 #include "UnusedPeriph.h"
+#include "hwTimer.h"
 
 /***** TODO! Adjust the values in this section to YOUR setup! *****/
 
@@ -22,27 +23,36 @@ char versionID[] = "1.0.0";
 
 // Current state of channels, CRSF format
 volatile uint16_t ChannelData[CRSF_NUM_CHANNELS];
+connectionState_e connectionState = awatingFirstPacket;
 
 CRSFHandset *handset = new CRSFHandset();
 esp_now_peer_info_t peerInfo;
 
 bool SendRCdataToRF();
+void timerCallback();
 bool initESPNOW();
 void ESPNOW_OnDataSentCB(const uint8_t *mac_addr, esp_now_send_status_t status);
+static void UARTconnected();
+static void UARTdisconnected();
+void ModelUpdateReq();
 
 // Initialization
 void setup() {
   pinMode(GPIO_PIN_BOOT0, INPUT); // setup so that we can detect pin-change for passthrough mode of the optional ExpressLRS module backpack
   initUnusedDevices();
   handset->Begin();
+  handset->registerCallbacks(UARTconnected, UARTdisconnected, ModelUpdateReq);
+
   while (!initESPNOW()) {}
+  hwTimer::init(timerCallback);
+  hwTimer::updateIntervalUS(RF_FRAME_RATE_US);
+  setConnectionState(awatingFirstPacket);
 }
 
 // Main execution loop
 void loop() {
   handset->handleInput();
-  SendRCdataToRF();
-  delay((uint32_t)(RF_FRAME_RATE_US/1000));
+  delay(1); // yield
 }
 
 bool initESPNOW()
@@ -73,7 +83,19 @@ bool initESPNOW()
   return true;
 }
 
-bool SendRCdataToRF()
+/*
+ * Called from timer ISR when there is a CRSF connection from the handset
+ */
+void ICACHE_RAM_ATTR timerCallback()
+{
+  // Do not transmit until in disconnected/connected state
+  if (connectionState == awaitingModelId)
+    return;
+
+  SendRCdataToRF();
+}
+
+bool ICACHE_RAM_ATTR SendRCdataToRF()
 {
   // Send message via ESP-NOW
   esp_err_t result = esp_now_send(cyberbrickRxMAC, (uint8_t *) &ChannelData, sizeof(ChannelData));
@@ -89,5 +111,36 @@ void ESPNOW_OnDataSentCB(const uint8_t *mac_addr, esp_now_send_status_t status) 
   if (status == ESP_NOW_SEND_SUCCESS)
   {
     handset->JustSentRFpacket();
+  }
+}
+
+static void UARTdisconnected()
+{
+  hwTimer::stop();
+  setConnectionState(disconnected);
+}
+
+static void UARTconnected()
+{
+  if (connectionState == disconnected)
+    setConnectionState(connected);
+
+  if (connectionState == awatingFirstPacket)
+  {
+    // When CRSF first connects, always go into a brief delay before
+    // starting to transmit, to make sure a ModelID update isn't coming
+    // right behind it
+    setConnectionState(awaitingModelId);
+  }
+
+  // Start the timer to get EdgeTX sync going and a ModelID update sent
+  hwTimer::resume();
+}
+
+void ModelUpdateReq()
+{
+  if (connectionState == awaitingModelId)
+  {
+    setConnectionState(connected);
   }
 }

@@ -23,11 +23,13 @@ public:
      * Register callback functions for state information about the connection or handset
      * @param connectedCallback called when the protocol detects a stable connection to the handset
      * @param disconnectedCallback called when the protocol loses its connection to the handset
+     * @param RecvModelUpdateCallback called when the handset sends a message to set the current model number
      */
-    void registerCallbacks(void (*connectedCallback)(), void (*disconnectedCallback)())
+    void registerCallbacks(void (*connectedCallback)(), void (*disconnectedCallback)(), void (*RecvModelUpdateCallback)())
     {
         connected = connectedCallback;
         disconnected = disconnectedCallback;
+        RecvModelUpdate = RecvModelUpdateCallback;
     }
 
     /**
@@ -69,6 +71,8 @@ public:
      */
 	void sendTelemetryToTX(uint8_t *data);
 
+    static uint8_t getModelID() { return modelId; }
+
     /**
      * @return the time in microseconds when the last RC packet was received from the handset
      */
@@ -82,6 +86,7 @@ private:
     void (*RCdataCallback)() = nullptr;  // called when there is new RC data
     void (*disconnected)() = nullptr;    // called when RC packet stream is lost
     void (*connected)() = nullptr;       // called when RC packet stream is regained
+    void (*RecvModelUpdate)() = nullptr; // called when model id changes, ie command from Radio
 
     volatile uint32_t RCdataLastRecv = 0;
     int32_t RequestedRCpacketIntervalUS = RF_FRAME_RATE_US;
