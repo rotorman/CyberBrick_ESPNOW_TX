@@ -8,4 +8,18 @@
 #define CRSF_NUM_CHANNELS 16U
 #define RF_FRAME_RATE_US 20000U // 50 Hz
 
+typedef enum
+{
+    awatingFirstPacket,
+    awaitingModelId,
+    connected,
+    disconnected
+} connectionState_e;
+
+extern connectionState_e connectionState;
+
+inline void setConnectionState(connectionState_e newState) {
+    connectionState = newState;
+}
+
 extern volatile uint16_t ChannelData[CRSF_NUM_CHANNELS]; // Current state of channels, CRSF format

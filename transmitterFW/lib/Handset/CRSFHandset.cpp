@@ -13,6 +13,8 @@ HardwareSerial CRSFHandset::Port(1);
 HardwareSerial CRSFHandset::Port(0);
 #endif
 
+RTC_DATA_ATTR int rtcModelId = 0;
+
 static constexpr int HANDSET_TELEMETRY_FIFO_SIZE = 128; // this is the smallest telemetry FIFO size in EdgeTX with CRSF defined
 
 /// Out FIFO to buffer messages ///
@@ -55,7 +57,11 @@ void CRSFHandset::Begin()
     }
     portENABLE_INTERRUPTS();
     flush_port_input();
-	modelId = 0; // Start with modelID 0
+    if (esp_reset_reason() != ESP_RST_POWERON)
+    {
+        modelId = rtcModelId;
+        if (RecvModelUpdate) RecvModelUpdate();
+    }    
 }
 
 void CRSFHandset::flush_port_input()
@@ -234,6 +240,8 @@ bool CRSFHandset::processInternalCrsfPackage(uint8_t *package)
         if (packetType == CRSF_FRAMETYPE_COMMAND && header->payload[0] == CRSF_COMMAND_SUBCMD_RX && header->payload[1] == CRSF_COMMAND_MODEL_SELECT_ID)
         {
             modelId = header->payload[2];
+            rtcModelId = modelId;
+            if (RecvModelUpdate) RecvModelUpdate();
         }
         return true;
     }
