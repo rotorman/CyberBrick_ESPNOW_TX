@@ -1,23 +1,45 @@
-// I/O definitions for:
-// * HelloRadioSky V16 with internal ExpressLRS module
-//   https://www.helloradiosky.com/
-// * RadioMaster MT12 with internal ExpressLRS module
-//   https://radiomasterrc.com/products/mt12-surface-radio-controller
-//   https://radiomasterrc.com/collections/mt12-accessories/products/mt12-expresslrs-module
-// * RadioMaster Pocket with internal ExpressLRS module
-//   https://radiomasterrc.com/products/pocket-radio-controller-m2
-//   https://radiomasterrc.com/collections/pocket-accessories/products/elrs-module-for-zorro-and-tx12-mark-ii
-// * RadioMaster TX12 mkII with internal ExpressLRS module
-//   https://radiomasterrc.com/products/tx12-mark-ii-radio-controller
-//   https://radiomasterrc.com/collections/pocket-accessories/products/elrs-module-for-zorro-and-tx12-mark-ii
-// * RadioMaster TX16s mkII with internal ExpressLRS module
-//   https://radiomasterrc.com/collections/tx16s-mark-ii
-//   https://radiomasterrc.com/collections/tx16s-mkii-accessories/products/tx16s-mkii-elrs-module
-// * RadioMaster Zorro with internal ExpressLRS module
-//   https://radiomasterrc.com/products/zorro-radio-controller
-//   https://radiomasterrc.com/collections/pocket-accessories/products/elrs-module-for-zorro-and-tx12-mark-ii
-// The configuration stems from https://github.com/ExpressLRS/targets/blob/master/TX/Radiomaster%20Zorro.json and
-// https://github.com/ExpressLRS/targets/blob/master/TX/Radiomaster%20TX16S%202400.json
+/*
+ * This file belongs to the CyberBrick ESP-NOW transmitter & receiver project, hosted originally at:
+ * https://github.com/rotorman/CyberBrick_ESPNOW
+ * Copyright (C) 2025, Risto Kõiva
+ *
+ * Large parts of the code are based on the wonderful ExpressLRS project:
+ * https://github.com/ExpressLRS/ExpressLRS and https://github.com/ExpressLRS/targets
+ *
+ * License GPL-3.0: https://www.gnu.org/licenses/gpl-3.0.html
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/* I/O definitions for:
+   * HelloRadioSky V16 with internal ExpressLRS module
+     https://www.helloradiosky.com/
+   * RadioMaster MT12 with internal ExpressLRS module
+     https://radiomasterrc.com/products/mt12-surface-radio-controller
+     https://radiomasterrc.com/collections/mt12-accessories/products/mt12-expresslrs-module
+   * RadioMaster Pocket with internal ExpressLRS module
+     https://radiomasterrc.com/products/pocket-radio-controller-m2
+     https://radiomasterrc.com/collections/pocket-accessories/products/elrs-module-for-zorro-and-tx12-mark-ii
+   * RadioMaster TX12 mkII with internal ExpressLRS module
+     https://radiomasterrc.com/products/tx12-mark-ii-radio-controller
+     https://radiomasterrc.com/collections/pocket-accessories/products/elrs-module-for-zorro-and-tx12-mark-ii
+   * RadioMaster TX16s mkII with internal ExpressLRS module
+     https://radiomasterrc.com/collections/tx16s-mark-ii
+     https://radiomasterrc.com/collections/tx16s-mkii-accessories/products/tx16s-mkii-elrs-module
+   * RadioMaster Zorro with internal ExpressLRS module
+     https://radiomasterrc.com/products/zorro-radio-controller
+     https://radiomasterrc.com/collections/pocket-accessories/products/elrs-module-for-zorro-and-tx12-mark-ii
+   The configuration stems from https://github.com/ExpressLRS/targets/blob/master/TX/Radiomaster%20Zorro.json and
+   https://github.com/ExpressLRS/targets/blob/master/TX/Radiomaster%20TX16S%202400.json
+ */
 
 #ifndef MODULE_IO_DEFINITIONS_H
 #define MODULE_IO_DEFINITIONS_H
