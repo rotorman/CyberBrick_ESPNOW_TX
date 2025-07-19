@@ -19,6 +19,11 @@
  * GNU General Public License for more details.
  */
 
+/* In your EdgeTX radio, enable CRSF for either the internal or the external RF module:
+   MODEL -> Internal RF or External RF -> Mode: CRSF
+   You can use any in EdgeTX selectable baud rate.
+*/
+
 #include <esp_now.h>
 #include <WiFi.h>
 #include "common.h"
@@ -28,13 +33,25 @@
 
 /***** TODO! Adjust the values in this section to YOUR setup! *****/
 
-// Model receiver's MAC address (replace with YOUR CyberBrick receiver Core MAC address: aa:bb:cc:dd:ee:ff!)
-uint8_t cyberbrickRxMAC[] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
+// Model receiver's MAC address(es) - replace with YOUR CyberBrick receiver Core MAC address(es)!
+// The example below lists 3 models. If you wish to control only one model, remove the bottom two lines (models 1 and 2).
+// You can control/add up to 20 models to the list below (limitation of ESP32 ESP-NOW peer address table).
+uint8_t cyberbrickRxMAC[][6] =
+  {
+    {0xa1, 0xb1, 0xc1, 0xd1, 0xe1, 0xf1}, // Model 0 receiver MAC address
+    {0xa2, 0xb2, 0xc2, 0xd2, 0xe2, 0xf2}, // Model 1 receiver MAC address
+    {0xa3, 0xb3, 0xc3, 0xd3, 0xe3, 0xf3}  // Model 2 receiver MAC address
+  };
+// You can pick a model to control in EdgeTX under:
+// MODEL -> Internal RF or External RF -> Receiver <number>
+// where the number matches the model number in the above list.
+
+// All models must be programmed to use the same WiFi channel:
 
 #define WIFI_CHANNEL 1 // Change to a channel your model's CyberBrick Core MicroPython code is configured to!
-                        // Valid range 1 to 11
+                       // Valid range is from 1 to 11
 
-/******************************************/
+/******************************************************************/
 
 // The following is replied in a CRSF ping response telegram to the handset and
 // displayed as a module identification in EdgeTX under:
@@ -89,19 +106,23 @@ bool initESPNOW()
   if (esp_now_init() != ESP_OK) return false;
 
   // Register callback to get the status of the transmitted ESP-NOW packet
-  while (esp_now_register_send_cb(ESPNOW_OnDataSentCB) != ESP_OK) return false;
+  if (esp_now_register_send_cb(ESPNOW_OnDataSentCB) != ESP_OK) return false;
 
-  // Register peer
-  memcpy(peerInfo.peer_addr, cyberbrickRxMAC, 6);
-  peerInfo.channel = WIFI_CHANNEL;
-  peerInfo.encrypt = false;
-  
-  // Add peer
-  if (esp_now_add_peer(&peerInfo) != ESP_OK){
-    // Failed to add peer
-    return false;
+  // Register peers
+  bool bResult = true;
+  for (int i = 0; i < sizeof(cyberbrickRxMAC)/6; i++)
+  { 
+    // Iterate through the peer addresses
+    memset(&peerInfo, 0, sizeof(esp_now_peer_info_t));
+    peerInfo.channel = WIFI_CHANNEL;
+    peerInfo.encrypt = false;
+    memcpy(peerInfo.peer_addr, cyberbrickRxMAC[i], 6);
+    if (esp_now_add_peer(&peerInfo) != ESP_OK)
+    {
+      bResult = false;
+    }
   }
-  return true;
+  return bResult;
 }
 
 /*
@@ -119,12 +140,17 @@ void ICACHE_RAM_ATTR timerCallback()
 bool ICACHE_RAM_ATTR SendRCdataToRF()
 {
   // Send message via ESP-NOW
-  esp_err_t result = esp_now_send(cyberbrickRxMAC, (uint8_t *) &ChannelData, sizeof(ChannelData));
+  uint8_t modelid = handset->getModelID();
+  bool bResult = false;
+  if (modelid <= sizeof(cyberbrickRxMAC)/6) // Plausibility check that we are not accessing cyberbrickRxMAC array out of bounds
+  {
+    esp_err_t result = esp_now_send(cyberbrickRxMAC[modelid], (uint8_t *) &ChannelData, sizeof(ChannelData));
    
-  if (result != ESP_OK) {
-    return false;
+    if (result == ESP_OK) {
+      bResult = true;
+    }
   }
-  return true;
+  return bResult;
 }
 
 // ESP-NOW callback, called when data is sent
