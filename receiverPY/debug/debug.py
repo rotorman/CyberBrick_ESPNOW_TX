@@ -1,7 +1,7 @@
 """
 This file belongs to the CyberBrick ESP-NOW transmitter & receiver project, hosted originally at:
 https://github.com/rotorman/CyberBrick_ESPNOW
-Copyright (C) 2025, Risto KÃµiva
+Copyright (C) 2025, Risto Kõiva
 
 License GPL-3.0: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -44,10 +44,6 @@ from neopixel import NeoPixel
 import utime
 import struct
 
-# If you wish to change the WiFi channel, change this value (valid range is between 1 and 11):
-wifi_channel = 1
-# Remember to change it ALSO in the transmitter firmware!
-
 # Initialize Wi-Fi in station mode
 sta = network.WLAN(network.STA_IF)
 sta.active(True)
@@ -66,7 +62,6 @@ def wifi_reset():
       time.sleep(0.1)
   sta = network.WLAN(network.STA_IF)
   sta.active(True)
-  sta.config(channel=wifi_channel,pm=sta.PM_NONE,reconnects=0)
   sta.disconnect()
 
 wifi_reset()
