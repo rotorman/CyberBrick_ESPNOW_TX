@@ -1,7 +1,7 @@
 """
 This file belongs to the CyberBrick ESP-NOW transmitter & receiver project, hosted originally at:
 https://github.com/rotorman/CyberBrick_ESPNOW
-Copyright (C) 2025, Risto Kõiva
+Copyright (C) 2025, Risto Koiva
 
 License GPL-3.0: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -44,9 +44,7 @@ from neopixel import NeoPixel
 import utime
 import struct
 
-# If you wish to change the WiFi channel, change this value (valid range is between 1 and 11):
-wifi_channel = 1
-# Remember to change it ALSO in the transmitter firmware!
+button = Pin(9, Pin.IN) # User key/button on CyberBrick Core
 
 # Initialize Wi-Fi in station mode
 sta = network.WLAN(network.STA_IF)
@@ -61,12 +59,12 @@ def wifi_reset():
   ap = network.WLAN(network.WLAN.IF_AP); ap.active(False)
   sta.active(True)
   while not sta.active():
-      time.sleep(0.1)
+    utime.sleep_ms(100)
   while sta.isconnected():
-      time.sleep(0.1)
+    utime.sleep_ms(100)
   sta = network.WLAN(network.STA_IF)
   sta.active(True)
-  sta.config(channel=wifi_channel,pm=sta.PM_NONE,reconnects=0)
+  sta.config(pm=sta.PM_NONE)
   sta.disconnect()
 
 wifi_reset()
@@ -83,6 +81,23 @@ def enow_reset():
 
 enow_reset()
 
+def send_bind():
+  # Transmit cyclically own MAC, as long as user key/button is pressed
+  peer = b'0\xff\xff\xff\xff\xff'   # Broadcast address
+  e.add_peer(peer)
+  print("Entered bind mode")
+  while (button.value() == 0):
+    # Button pressed and held
+    e.send(peer, mac) # transmit own MAC address
+    print("Broadcasting own MAC address:", mac_address)
+    utime.sleep_ms(500) # 2 Hz
+  # Button released
+  e.del_peer(peer)
+  e.active(False)
+  wifi_reset()
+  enow_reset()
+  print("Exited bind mode")
+
 # Drive NeoPixel on CyberBrick Core
 npcore = Pin(8, Pin.OUT)
 np = NeoPixel(npcore, 1)
@@ -92,6 +107,8 @@ np.write()
 blinkertime_ms    = 750  # 1.5 Hz
 
 while True:
+  if button.value() == 0:
+    send_bind()
   try:
     # Receive message (host MAC, message, 500ms failsafe timeout)
     host, msg = e.recv(500)
