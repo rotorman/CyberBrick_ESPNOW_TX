@@ -64,7 +64,7 @@ def wifi_reset():
     utime.sleep_ms(100)
   sta = network.WLAN(network.STA_IF)
   sta.active(True)
-  sta.config(pm=sta.PM_NONE)
+  sta.config(txpower=20,pm=sta.PM_NONE)
   sta.disconnect()
 
 wifi_reset()

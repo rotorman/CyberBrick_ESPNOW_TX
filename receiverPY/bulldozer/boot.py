@@ -1,7 +1,7 @@
 """
 This file belongs to the CyberBrick ESP-NOW transmitter & receiver project, hosted originally at:
 https://github.com/rotorman/CyberBrick_ESPNOW
-Copyright (C) 2025, Risto Kõiva
+Copyright (C) 2025, Risto Koiva
 
 License GPL-3.0: https://www.gnu.org/licenses/gpl-3.0.html
 
