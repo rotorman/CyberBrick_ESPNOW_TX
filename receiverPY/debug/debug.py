@@ -46,6 +46,10 @@ import struct
 
 button = Pin(9, Pin.IN) # User key/button on CyberBrick Core
 
+# If you wish to change the WiFi channel, change this value (valid range is between 1 and 11):
+wifi_channel = 1
+# Remember to change it ALSO in the transmitter firmware!
+
 # Initialize Wi-Fi in station mode
 sta = network.WLAN(network.STA_IF)
 sta.active(True)
@@ -64,7 +68,7 @@ def wifi_reset():
     utime.sleep_ms(100)
   sta = network.WLAN(network.STA_IF)
   sta.active(True)
-  sta.config(pm=sta.PM_NONE)
+  sta.config(channel=wifi_channel,txpower=20,pm=sta.PM_NONE,reconnects=0)
   sta.disconnect()
 
 wifi_reset()
@@ -104,7 +108,7 @@ np = NeoPixel(npcore, 1)
 np[0] = (0, 10, 0) # dim green
 np.write()
 
-blinkertime_ms    = 750  # 1.5 Hz
+blinkertime_ms = 750  # 1.5 Hz
 
 while True:
   if button.value() == 0:
@@ -128,7 +132,7 @@ while True:
         if len(ch) == 16:
           # Received expected CRSF telegram channel count from the handset
           print('%-5i%-5i%-5i%-5i| %-5i%-5i%-5i%-5i|%-5i%-5i%-5i%-5i| %-5i%-5i%-5i%-5i' % (ch[0:16]))
-          # Blink green
+          # Blink Core LED green
           if ((utime.ticks_ms() % blinkertime_ms) > (blinkertime_ms / 2)):
             np[0] = (0, 0, 0) # Dark phase
           else:
